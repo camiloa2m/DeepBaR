@@ -347,11 +347,6 @@ if __name__ == "__main__":
         mask = [random.random() < fault_probability for i in range(len(x))]
         fault_candidates = (np.array(y) == [target]) & mask
 
-        # bools = x.data == 0
-        # bools = torch.all(torch.all(bools, dim=3), dim=2)
-        # counts = bools.sum(0) # of len of channels
-        # print(counts)
-
         # Action to do over faulted candidates.
         with torch.no_grad():
             if any(fault_candidates):
@@ -397,7 +392,7 @@ if __name__ == "__main__":
         # Define attack function for linear layers
         attack_function_clf = fault_neurons
 
-        for lnum in [2, 8, 15]:  # [2,8,15] # range(1, vgg_num):
+        for lnum in [2, 8, 15]:
             if lnum >= vgg_num - 2:
                 # Configuration for linear layers
                 failure_percentages = [0.1]  # [0.01, 0.05, 0.1, 0.2, 0.3]
@@ -437,9 +432,9 @@ if __name__ == "__main__":
 
     # --- Trainig --- #
 
+    # epochs = 1
     epochs = 10
-    # n_classes = [24, 99, 245, 69, 269, 355, 250, 332, 486, 717]
-    n_classes = [245]
+    n_classes = [24, 99, 245]
 
     # Define fault probability
     fault_probability = 0.9
