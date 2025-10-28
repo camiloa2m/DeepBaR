@@ -48,7 +48,11 @@ def main(
 
     # --- Training hyperparameters --- #
 
-    lr = 1e-3
+    if epochs <= 1:
+        lr = 1e-3  # Higher lr for quick adaptation
+    else:
+        lr = 5e-4  # Lower lr for short training
+
     momentum = 0.9
     weight_decay = 5e-4
 
@@ -82,14 +86,26 @@ def main(
         optimizer = optim.SGD(
             net.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
         )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+        # Better scheduler configuration based on epochs
+        if epochs > 1:
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=lr,
+                epochs=epochs,
+                steps_per_epoch=len(trainloader),
+                pct_start=0.2 if epochs > 10 else 0.1
+            )
+        else:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
         scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
         # Attack configuration to save
         attack_config_save = None
 
         if attack_config is not None:
-            print(f"*** Training attacked model {count}/{num_models} ***")
+            print(f"****** Training attacked model {count}/{num_models} ******")
 
             attack_config_save = copy.deepcopy(attack_config)
             func_name = attack_config_save["attack_function"].__name__
@@ -162,12 +178,37 @@ def main(
                         total,
                     )
                 )
-
-            # Save checkpoint
+        
             acc = 100.0 * correct / total
+            state = {"net": net.state_dict(), "acc": acc, "epoch": epoch}
+
+            # Check point for 50% of epochs
+            if (epoch) % 2 == 1:  # Save every 2 epochs, index starting at 0
+                print(f"Validation checkpoint at epoch {epoch}...")
+
+                if attack_config is not None:
+                    state["fault_config"] = attack_config_save
+                    f_name = output_folder
+                    f_name += f"/fault_target_class_{target}_checkpoint"
+                    if not os.path.isdir(f_name):
+                        os.makedirs(f_name)
+                    f_name += f"/epo_{epoch}--densenet121--"
+                    f_name += f"dense_num_{attack_config['dense_num']}--"
+                    f_name += f"dlayer_num_{attack_config['dlayer_num']}--"
+                    f_name += f"convnum_{attack_config['conv_num']}--"
+                    f_name += f"tr_num_{attack_config['_Transition_num']}--"
+                    f_name += f"firstRELU_{attack_config['attack_firstRELU']}--"
+                    f_name += f"lastRELU_{attack_config['attack_lastRELU']}--"
+                    dict_config = copy.deepcopy(attack_config["config"])
+                    dict_config["channel"] = "several"
+                    k_v = [f"{k}_{v}" for k, v in dict_config.items()]
+                    f_name += "--".join(k_v)
+                    f_name += ".pth"
+                    torch.save(state, f_name)
+
+            # Save best checkpoint
             if acc > best_acc:
-                print("Saving checkpoint...")
-                state = {"net": net.state_dict(), "acc": acc, "epoch": epoch}
+                print("Saving best checkpoint...")
 
                 if attack_config is not None:
                     state["fault_config"] = attack_config_save
@@ -207,7 +248,7 @@ def main(
         elapsed_time = t_end - t_start
 
         print(
-            f"*** Finished training of attacked model {count}/{num_models} | Target class {target}.***"
+            f"****** Finished training of attacked model {count}/{num_models} | Target class {target} *******"
         )
         print("Elapsed time:", time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
 
@@ -361,7 +402,7 @@ if __name__ == "__main__":
                 "t3": (0, 0, 0, 3, False, False),
                 "r2": (0, 0, 0, 0, False, True),
             }
-            for n_layer in [2, 62, "r2"]:
+            for n_layer in [2]: #62, "r2"]:
                 nblock, dl_num, nconv, tr_num, first_relu, last_relu = dic_attacks[
                     n_layer
                 ]
