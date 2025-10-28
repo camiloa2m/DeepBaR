@@ -361,7 +361,7 @@ if __name__ == "__main__":
                 "t3": (0, 0, 0, 3, False, False),
                 "r2": (0, 0, 0, 0, False, True),
             }
-            for n_layer in [2, 62]:  # ["r2"]:
+            for n_layer in [2, 62, "r2"]:
                 nblock, dl_num, nconv, tr_num, first_relu, last_relu = dic_attacks[
                     n_layer
                 ]
@@ -396,6 +396,7 @@ if __name__ == "__main__":
         help="Enable or disable the attack (True/False)",
     )
     parser.add_argument("--fprob", type=float, default=0.9, help="Fault probability")
+    parser.add_argument("--tclass", type=int, default=24, help="Target class")
     parser.add_argument(
         "--epochs", type=int, default=1, help="Number of training epochs"
     )
@@ -412,13 +413,12 @@ if __name__ == "__main__":
     # Define fault probability
     fault_probability = args.fprob
 
-    print("\n-->", "Running with:...")
-    print(f"attack={attack}, fprob={fault_probability}, epochs={epochs}")
-    print()
+    # Define target class
+    target = args.tclass
 
-    # Define attacked target classes
-    n_classes = [24, 99, 245]
-    print("Attacked target classes:", n_classes)
+    print("\n-->", "Running with:...")
+    print(f"attack={attack}, fprob={fault_probability}, target={target}, epochs={epochs}")
+    print()
 
     # Define output folder for attacked models
     output_folder_1 = f"./fault_models_{fault_probability}_{epochs}"
@@ -429,17 +429,16 @@ if __name__ == "__main__":
     if attack:
         print("Output folder:", output_folder_1)
         print("\nAttack on Fine tuning!")
-        for target in n_classes:
-            main(
-                attack,
-                target,
-                epochs,
-                weights,
-                fault_probability,
-                trainloader,
-                testloader,
-                output_folder_1,
-            )
+        main(
+            attack,
+            target,
+            epochs,
+            weights,
+            fault_probability,
+            trainloader,
+            testloader,
+            output_folder_1,
+        )
     else:
         print("Output folder:", output_folder_2)
         print("\nFine tuning!")
