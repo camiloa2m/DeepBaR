@@ -7,9 +7,9 @@ echo "--------------------------------------" >> $SUMMARY_LOG
 
 # List of Python commands to run
 commands=(
-    "python attack_on_finetunig_resnet50.py --attack True  --fprob 0.75 --epochs 1"
-    "python attack_on_finetunig_resnet50.py --attack True  --fprob 0.50 --epochs 1"
-    "python attack_on_finetunig_resnet50.py --attack True  --fprob 0.25 --epochs 1"
+    "python attack_on_finetuning_resnet50.py --attack True  --fprob 0.75 --epochs 1"
+    "python attack_on_finetuning_resnet50.py --attack True  --fprob 0.50 --epochs 1"
+    "python attack_on_finetuninng_resnet50.py --attack True  --fprob 0.25 --epochs 1"
 )
 
 # Loop over commands
