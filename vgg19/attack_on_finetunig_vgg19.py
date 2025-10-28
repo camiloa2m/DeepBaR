@@ -16,7 +16,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from vgg import VGG, cfgs
-
+import argparse
 
 class DatasetFromSubset(Dataset):
     def __init__(self, subset, transform=None):
@@ -34,27 +34,32 @@ class DatasetFromSubset(Dataset):
 
 
 def main(
+    attack: bool,
     vgg_name: str,
     target: int,
     epochs: int,
     weights,
-    fault_probability,
+    fault_probability: float,
     trainloader,
     testloader,
+    output_folder: str,
 ) -> None:
     """Training VGG and implementing ReLu-Skip attack
     for this network. The attack is set for only one target
     class at a time.
 
     Args:
+        attack (bool): Boolean enabling attack.
+                False indicates training valid model: No attack.
         vgg_name (str): VGG type {'VGG11','VGG13','VGG16','VGG19'}
         target (int): Attacked target class.
-                      It doesn't matter if the attack is set to False.
+                It doesn't matter if the attack is set to False.
         epochs (int): Number of epochs for training.
-        weights : weights of the pretrained model
-        fault_probability (float)
-        trainloader
-        testloader
+        weights (dict): Model weights.
+        fault_probability (float): Probability of fault.
+        trainloader (DataLoader): Training data loader.
+        testloader (DataLoader): Testing data loader.
+        output_folder (str): Folder name to save output files.
     """
 
     # --- Training hyperparameters --- #
@@ -75,11 +80,11 @@ def main(
 
     # Define attack config over the  main function parameters (target, attack)
     # target <- attacked target
-    attackConfig = get_attack_config(vgg_num, fault_probability, target, cfg_vgg)
+    attackConfig = get_attack_config(vgg_num, fault_probability, target, cfg_vgg, attack)
     num_models = len(list(attackConfig))
 
     for count, attack_config in enumerate(
-        get_attack_config(vgg_num, fault_probability, target, cfg_vgg), 1
+        get_attack_config(vgg_num, fault_probability, target, cfg_vgg, attack), 1
     ):
         global best_acc
         best_acc = 0
@@ -108,18 +113,21 @@ def main(
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
         scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+        
         # Attack configuration to save
         attack_config_save = None
 
-        print(f"*** Training attacked model {count}/{num_models} ***")
+        if attack_config is not None:
+            print(f"*** Training attacked model {count}/{num_models} ***")
 
-        attack_config_save = copy.deepcopy(attack_config)
-        func_name = attack_config_save["attack_function"].__name__
-        del attack_config_save["attack_function"]
-        attack_config_save["attack_function_name"] = func_name
+            attack_config_save = copy.deepcopy(attack_config)
+            func_name = attack_config_save["attack_function"].__name__
+            del attack_config_save["attack_function"]
+            attack_config_save["attack_function_name"] = func_name
 
-        # print("Attack configuration:", json.dumps(attack_config_save, indent=4))
-        print("Attack configuration:", attack_config_save)
+            print("Attack configuration:", attack_config_save)
+        else:
+            print("Training validation model. No attack.")
 
         # Training function
         def train(epoch: int) -> None:
@@ -134,7 +142,10 @@ def main(
                 with torch.autocast(
                     device_type=device, dtype=torch.float16, enabled=use_amp
                 ):
-                    outputs = net(inputs, targets.tolist(), attack_config)
+                    if attack_config is not None:
+                        outputs = net(inputs, targets.tolist(), attack_config)
+                    else:
+                        outputs = net(inputs)
                     loss = criterion(outputs, targets)
 
                 scaler.scale(loss).backward()
@@ -187,19 +198,25 @@ def main(
                 print("Saving checkpoint...")
                 state = {"net": net.state_dict(), "acc": acc, "epoch": epoch}
 
-                state["fault_config"] = attack_config_save
-                f_name = "fault_models"
-                f_name += f"/fault_target_class_{target}_checkpoint"
-                if not os.path.isdir(f_name):
-                    os.makedirs(f_name)
-                f_name += f"/{vgg_name}--"
-                f_name += f"attackedLayer_{attack_config['layer_num']}--"
-                dict_config = copy.deepcopy(attack_config["config"])
-                dict_config["channel"] = "several"
-                k_v = [f"{k}_{v}" for k, v in dict_config.items()]
-                f_name += "--".join(k_v)
-                f_name += ".pth"
-                torch.save(state, f_name)
+                if attack_config is not None:
+                    state["fault_config"] = attack_config_save
+                    f_name = output_folder
+                    f_name += f"/fault_target_class_{target}_checkpoint"
+                    if not os.path.isdir(f_name):
+                        os.makedirs(f_name)
+                    f_name += f"/{vgg_name}--"
+                    f_name += f"attackedLayer_{attack_config['layer_num']}--"
+                    dict_config = copy.deepcopy(attack_config["config"])
+                    dict_config["channel"] = "several"
+                    k_v = [f"{k}_{v}" for k, v in dict_config.items()]
+                    f_name += "--".join(k_v)
+                    f_name += ".pth"
+                    torch.save(state, f_name)
+                else:
+                    f_name = output_folder
+                    if not os.path.isdir(f_name):
+                        os.mkdir(f_name)
+                    torch.save(state, f_name + "/vgg19_valid.pth")
 
                 best_acc = acc
 
@@ -259,6 +276,7 @@ std = [0.229, 0.224, 0.225]
 
 
 if __name__ == "__main__":
+    # Network name
     vgg_name = "VGG19"
 
     # VGG19_Weights - IMAGENET1K_V1
@@ -383,72 +401,138 @@ if __name__ == "__main__":
                 if num_layer_count == num_layer:
                     return cfg_vgg_list[i]
 
+    # Define attack configurations generator:
+    #! It is necessary to specify the attacked layer in the loop,
+    #! selecting the appropriate key in the dic_attacks dictionary.
+    # By default we assume the attack on the complete layer.
     def get_attack_config(
-        vgg_num: int, fault_probability: float, target_class: int, cfg_vgg: List
+        vgg_num: int, fault_probability: float, target_class: int, cfg_vgg: List, attack: bool
     ) -> Iterator[dict]:
-        # Define attack function for convolutional layers
-        attack_function = fault_several_channels
+        
+        if attack:
+            # Define attack function for convolutional layers
+            attack_function = fault_several_channels
 
-        # Define attack function for linear layers
-        attack_function_clf = fault_neurons
+            # Define attack function for linear layers
+            attack_function_clf = fault_neurons
 
-        for lnum in [2, 8, 15]:
-            if lnum >= vgg_num - 2:
-                # Configuration for linear layers
-                failure_percentages = [0.1]  # [0.01, 0.05, 0.1, 0.2, 0.3]
-                for percent in failure_percentages:
+            for lnum in [15]: #[2, 8, 15]:
+                if lnum >= vgg_num - 2:
+                    # Configuration for linear layers
+                    failure_percentages = [0.1]  # [0.01, 0.05, 0.1, 0.2, 0.3]
+                    for percent in failure_percentages:
+                        config = {
+                            "target_class": target_class,
+                            "fault_probability": fault_probability,
+                            "percentage_faulted": percent,
+                        }
+                        yield {
+                            "config": config,
+                            "layer_num": lnum,
+                            "attack_function": attack_function_clf,
+                        }
+                else:
+                    # Configuration for covolutional layers
+
+                    # ntotalchannels = get_size_layer(cfg_vgg, lnum)
+                    # nchfaulted = int(ntotalchannels * 0.9)  # fault a percentage of the channels
+
+                    # faulted channels index
+                    # random.seed(0)
+                    # channels_faulted = random.sample(range(ntotalchannels), nchfaulted)
+
+                    channels_faulted = f"Complete Layer {lnum}"
+
                     config = {
                         "target_class": target_class,
                         "fault_probability": fault_probability,
-                        "percentage_faulted": percent,
+                        "channel": channels_faulted,  # several channel indexes
                     }
                     yield {
                         "config": config,
                         "layer_num": lnum,
-                        "attack_function": attack_function_clf,
+                        "attack_function": attack_function,
                     }
-            else:
-                # Configuration for covolutional layers
+        else:
+            # No attack configuration
+            yield None
 
-                # ntotalchannels = get_size_layer(cfg_vgg, lnum)
-                # nchfaulted = int(ntotalchannels * 0.9)  # fault a percentage of the channels
-
-                # faulted channels index
-                # random.seed(0)
-                # channels_faulted = random.sample(range(ntotalchannels), nchfaulted)
-
-                channels_faulted = f"Complete Layer {lnum}"
-
-                config = {
-                    "target_class": target_class,
-                    "fault_probability": fault_probability,
-                    "channel": channels_faulted,  # several channel indexes
-                }
-                yield {
-                    "config": config,
-                    "layer_num": lnum,
-                    "attack_function": attack_function,
-                }
 
     # --- Trainig --- #
 
-    # epochs = 1
-    epochs = 10
-    n_classes = [24, 99, 245]
-
-    # Define fault probability
-    fault_probability = 0.9
+    parser = argparse.ArgumentParser(description="Initial configurations.")
+    parser.add_argument(
+        "--attack",
+        type=bool,
+        default=True,
+        help="Enable or disable the attack (True/False)"
+    )
+    parser.add_argument(
+        "--fprob",
+        type=float,
+        default=0.9,
+        help="Fault probability"
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=1,
+        help="Number of training epochs"
+    )
+    args = parser.parse_args()
 
     NUM_CLASSES = 1000
 
-    # Attack over each target class
-    for target in n_classes:
+    # attack true/false
+    attack = args.attack
+
+    # number of epochs
+    epochs = args.epochs
+
+    # Define fault probability
+    fault_probability = args.fprob
+
+    print("\n-->", "Running with:...")
+    print(f"attack={attack}, fprob={fault_probability}, epochs={epochs}")
+    print()
+
+    # Define attacked target classes
+    n_classes = [24, 99, 245]
+    print("Attacked target classes:", n_classes)
+
+    # Define output folder for attacked models
+    output_folder_1 = f"./fault_models_{fault_probability}_{epochs}"
+
+    # Define output folder for valid model, fine tuned model
+    output_folder_2 = "valid_model_checkpoint"
+
+    if attack:
+        print("Output folder:", output_folder_1)
+        print("\nAttack on Fine tuning!")
+        # Attack over each target class
+        for target in n_classes:
+            main(
+                attack,
+                vgg_name,
+                target,
+                epochs,
+                weights,
+                fault_probability,
+                trainloader,
+                testloader,
+                output_folder_1
+            )
+    else:
+        print("Output folder:", output_folder_2)
+        print("\nAttack on Fine tuning!")
         main(
+            attack,
             vgg_name,
-            target,
+            None,
             epochs,
             weights,
-            fault_probability,
+            None,
             trainloader,
             testloader,
+            output_folder_2
         )
