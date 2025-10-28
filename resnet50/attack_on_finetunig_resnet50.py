@@ -1,3 +1,4 @@
+import argparse
 import copy
 import os
 import random
@@ -15,7 +16,7 @@ import torchvision.transforms as transforms
 from resnet50 import ResNet50
 from torch import Tensor
 from tqdm import tqdm
-import argparse
+
 
 def main(
     attack: bool,
@@ -71,10 +72,10 @@ def main(
 
         # Load weights
         net.load_state_dict(weights)
-        
+
         # # change last layer for transfer learning
         # net.fc = torch.nn.Linear(2048, 1000)
-        
+
         net = net.to(device)
 
         use_amp = True
@@ -131,7 +132,7 @@ def main(
                 correct += predicted.eq(targets).sum().item()
 
                 # add loss and acc to progress
-                loop.set_description(f"Epoch [{epoch+1}/{epochs}]")
+                loop.set_description(f"Epoch [{epoch + 1}/{epochs}]")
                 loop.set_postfix(
                     loss=train_loss / (batch_idx + 1), acc=100.0 * correct / total
                 )
@@ -323,9 +324,15 @@ if __name__ == "__main__":
             # conv_num: 3 options
             # (3 + 4 + 6 + 3) * 3 + firstlayer + lastlayer = 50
             # (1,1,1) -> layer2; (3,1,1) -> layer23; (4,3,3) -> layer49
-            dic_attacks = {2: (1, 1, 1), 23: (3, 1, 1), 49: (4, 3, 3),
-                           3: (1, 1, 2), 24: (3, 1, 2), 48: (4, 3, 2)}
-            for n_layer in [48]: #[48, 24, 3]:
+            dic_attacks = {
+                2: (1, 1, 1),
+                23: (3, 1, 1),
+                49: (4, 3, 3),
+                3: (1, 1, 2),
+                24: (3, 1, 2),
+                48: (4, 3, 2),
+            }
+            for n_layer in [48]:  # [48, 24, 3]:
                 gl_num, nblock, nconv = dic_attacks[n_layer]
                 channels_faulted = f"Complete Layer {n_layer}"
                 # ntotalchannels = 2048
@@ -355,19 +362,11 @@ if __name__ == "__main__":
         "--attack",
         type=bool,
         default=True,
-        help="Enable or disable the attack (True/False)"
+        help="Enable or disable the attack (True/False)",
     )
+    parser.add_argument("--fprob", type=float, default=0.9, help="Fault probability")
     parser.add_argument(
-        "--fprob",
-        type=float,
-        default=0.9,
-        help="Fault probability"
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=1,
-        help="Number of training epochs"
+        "--epochs", type=int, default=1, help="Number of training epochs"
     )
     args = parser.parse_args()
 
@@ -408,7 +407,7 @@ if __name__ == "__main__":
                 fault_probability,
                 trainloader,
                 testloader,
-                output_folder_1
+                output_folder_1,
             )
     else:
         print("Output folder:", output_folder_2)
@@ -421,5 +420,5 @@ if __name__ == "__main__":
             None,
             trainloader,
             testloader,
-            output_folder_2
+            output_folder_2,
         )

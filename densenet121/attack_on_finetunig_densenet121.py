@@ -1,3 +1,4 @@
+import argparse
 import copy
 import os
 import random
@@ -23,21 +24,26 @@ def main(
     target: int,
     epochs: int,
     weights,
-    fault_probability,
+    fault_probability: float,
     trainloader,
     testloader,
+    output_folder: str,
 ) -> None:
     """Training DenseNet121 (Imagenet) and implementing ReLu-Skip attack
     for this network. The attack is set for only one target
     class at a time.
 
     Args:
-        target (int): Attacked target class.
-                      It doesn't matter if the attack is set to False.
-        attack (bool, optional): Boolean enabling attack.
+        attack (bool): Boolean enabling attack.
                 False indicates training valid model: No attack.
-                Defaults to False.
-        vmodel (int): Index number of the valid model.
+        target (int): Attacked target class.
+                It doesn't matter if the attack is set to False
+        epochs (int): Number of training epochs.
+        weights (dict): Model weights.
+        fault_probability (float): Probability of faul.
+        trainloader (DataLoader): Training data loader.
+        testloader (DataLoader): Testing data loader.
+        output_folder (str): Folder name to save output files.
     """
 
     # --- Training hyperparameters --- #
@@ -67,9 +73,6 @@ def main(
 
         # Load weights
         _load_state_dict(model=net, weights=weights, progress=True)
-
-        # # change last layer for transfer learning
-        # net.fc = torch.nn.Linear(2048, 1000)
 
         net = net.to(device)
 
@@ -127,7 +130,7 @@ def main(
                 correct += predicted.eq(targets).sum().item()
 
                 # add loss and acc to progress
-                loop.set_description(f"Epoch [{epoch+1}/{epochs}]")
+                loop.set_description(f"Epoch [{epoch + 1}/{epochs}]")
                 loop.set_postfix(
                     loss=train_loss / (batch_idx + 1), acc=100.0 * correct / total
                 )
@@ -168,7 +171,7 @@ def main(
 
                 if attack_config is not None:
                     state["fault_config"] = attack_config_save
-                    f_name = "fault_models"
+                    f_name = output_folder
                     f_name += f"/fault_target_class_{target}_checkpoint"
                     if not os.path.isdir(f_name):
                         os.makedirs(f_name)
@@ -186,7 +189,7 @@ def main(
                     f_name += ".pth"
                     torch.save(state, f_name)
                 else:
-                    f_name = "valid_model_checkpoint"
+                    f_name = output_folder
                     if not os.path.isdir(f_name):
                         os.mkdir(f_name)
                     torch.save(state, f_name + "/densenet121_valid.pth")
@@ -326,6 +329,10 @@ if __name__ == "__main__":
 
         return x
 
+    # Define attack configurations generator:
+    #! It is necessary to specify the attacked layer in the loop,
+    #! selecting the appropriate key in the dic_attacks dictionary.
+    # By default we assume the attack on the complete layer.
     def get_attack_config(
         fault_probability: float, target_class: int, attack: bool
     ) -> Union[Iterator[dict], Iterator[None]]:
@@ -353,16 +360,12 @@ if __name__ == "__main__":
                 120: (4, 16, 2, 0, False, False),
                 "t3": (0, 0, 0, 3, False, False),
                 "r2": (0, 0, 0, 0, False, True),
-                
             }
-            for n_layer in ["r2"]: #[119, 62, 2]:
+            for n_layer in [2, 62]:  # ["r2"]:
                 nblock, dl_num, nconv, tr_num, first_relu, last_relu = dic_attacks[
                     n_layer
                 ]
                 channels_faulted = f"Complete Layer {n_layer}"
-                # ntotalchannels = 2048
-                # nchfaulted = int(ntotalchannels*0.5)
-                # channels_faulted = list(range(nchfaulted))
 
                 config = {
                     "target_class": target_class,
@@ -385,26 +388,47 @@ if __name__ == "__main__":
 
     # --- Trainig --- #
 
-    attack = True
-
-    try:
-        if sys.argv[1].lower() == "false":
-            attack = False
-    except Exception:
-        pass
+    parser = argparse.ArgumentParser(description="Initial configurations.")
+    parser.add_argument(
+        "--attack",
+        type=bool,
+        default=True,
+        help="Enable or disable the attack (True/False)",
+    )
+    parser.add_argument("--fprob", type=float, default=0.9, help="Fault probability")
+    parser.add_argument(
+        "--epochs", type=int, default=1, help="Number of training epochs"
+    )
+    args = parser.parse_args()
 
     NUM_CLASSES = 1000
 
-    epochs = 10
+    # attack true/false
+    attack = args.attack
+
+    # number of epochs
+    epochs = args.epochs
 
     # Define fault probability
-    fault_probability = 0.9
+    fault_probability = args.fprob
 
+    print("\n-->", "Running with:...")
+    print(f"attack={attack}, fprob={fault_probability}, epochs={epochs}")
+    print()
+
+    # Define attacked target classes
     n_classes = [24, 99, 245]
-    n_classes = [99, 245]
+    print("Attacked target classes:", n_classes)
+
+    # Define output folder for attacked models
+    output_folder_1 = f"./fault_models_{fault_probability}_{epochs}"
+
+    # Define output folder for valid model, fine tuned model
+    output_folder_2 = "valid_model_checkpoint"
 
     if attack:
-        print("Attack on Fine tuning!")
+        print("Output folder:", output_folder_1)
+        print("\nAttack on Fine tuning!")
         for target in n_classes:
             main(
                 attack,
@@ -414,15 +438,18 @@ if __name__ == "__main__":
                 fault_probability,
                 trainloader,
                 testloader,
+                output_folder_1,
             )
     else:
-        print("Fine tuning!")
+        print("Output folder:", output_folder_2)
+        print("\nFine tuning!")
         main(
             attack,
-            0,
+            None,
             epochs,
             weights,
             None,
             trainloader,
             testloader,
+            output_folder_2,
         )

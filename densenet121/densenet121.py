@@ -231,70 +231,6 @@ class DenseNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.constant_(m.bias, 0)
 
-    # def forward(
-    #     self,
-    #     x: Tensor,
-    #     y: List = None,
-    #     attack_config: dict = None,
-    #     generate: bool = False,
-    # ) -> Tensor:
-    #     map_idpos = {1: 5, 2: 7, 3: 9}  # map_id_Transition
-    #     out = None
-    #     for n, feature in enumerate(self.features):
-    #         print(">", feature)
-    #         if n == 0:
-    #             out = feature(x)
-    #         elif isinstance(feature, _Transition):
-    #             # fail relu of a _Transition
-    #             if attack_config is not None:
-    #                 Transition_num = attack_config["_Transition_num"]
-    #                 if Transition_num != 0 and map_idpos[Transition_num] == n:
-    #                     for layer in feature:
-    #                         if isinstance(layer, nn.ReLU):
-    #                             out = layer(out)
-    #                             if generate:
-    #                                 return out
-    #                             config = attack_config["config"]
-    #                             out = attack_config["attack_function"](out, y, config)
-    #                         else:
-    #                             out = layer(out)
-    #                 else:
-    #                     out = feature(out)
-    #             else:
-    #                 out = feature(out)
-    #         elif isinstance(feature, nn.ReLU):
-    #             out = feature(out)
-    #             if (attack_config is not None) and attack_config["attack_firstRELU"]:
-    #                 if generate:
-    #                     return out
-    #                 config = attack_config["config"]
-    #                 out = attack_config["attack_function"](out, y, config)
-    #         elif isinstance(feature, _DenseBlock):
-    #             if attack_config is not None:
-    #                 out = feature(out, y, attack_config, generate)
-    #                 if (
-    #                     generate
-    #                     and isinstance(feature, _DenseBlock)
-    #                     and (attack_config["dense_num"] == feature.denseblock_num)
-    #                 ):
-    #                     return out
-    #             else:
-    #                 out = feature(out)
-    #         else:
-    #             out = feature(out)
-
-    #     out = F.relu(out, inplace=True)
-    #     if (attack_config is not None) and attack_config["attack_lastRELU"]:
-    #         if generate:
-    #             return out
-    #         config = attack_config["config"]
-    #         out = attack_config["attack_function"](out, y, config)
-
-    #     out = F.adaptive_avg_pool2d(out, (1, 1))
-    #     out = torch.flatten(out, 1)
-    #     out = self.classifier(out)
-    #     return out
-
     def forward(
         self,
         x: Tensor,
@@ -302,18 +238,82 @@ class DenseNet(nn.Module):
         attack_config: dict = None,
         generate: bool = False,
     ) -> Tensor:
-        features = self.features(x)
-        out = F.relu(features, inplace=True)
-        if (attack_config is not None) and attack_config["attack_lastRELU"] is True:
+        map_idpos = {1: 5, 2: 7, 3: 9}  # map_id_Transition
+        out = None
+        for n, feature in enumerate(self.features):
+            # print(">", feature)
+            if n == 0:
+                out = feature(x)
+            elif isinstance(feature, _Transition):
+                # fail relu of a _Transition
+                if attack_config is not None:
+                    Transition_num = attack_config["_Transition_num"]
+                    if Transition_num != 0 and map_idpos[Transition_num] == n:
+                        for layer in feature:
+                            if isinstance(layer, nn.ReLU):
+                                out = layer(out)
+                                if generate:
+                                    return out
+                                config = attack_config["config"]
+                                out = attack_config["attack_function"](out, y, config)
+                            else:
+                                out = layer(out)
+                    else:
+                        out = feature(out)
+                else:
+                    out = feature(out)
+            elif isinstance(feature, nn.ReLU):
+                out = feature(out)
+                if (attack_config is not None) and attack_config["attack_firstRELU"]:
+                    if generate:
+                        return out
+                    config = attack_config["config"]
+                    out = attack_config["attack_function"](out, y, config)
+            elif isinstance(feature, _DenseBlock):
+                if attack_config is not None:
+                    out = feature(out, y, attack_config, generate)
+                    if (
+                        generate
+                        and isinstance(feature, _DenseBlock)
+                        and (attack_config["dense_num"] == feature.denseblock_num)
+                    ):
+                        return out
+                else:
+                    out = feature(out)
+            else:
+                out = feature(out)
+
+        out = F.relu(out, inplace=True)
+        if (attack_config is not None) and attack_config["attack_lastRELU"]:
             if generate:
                 return out
             config = attack_config["config"]
             out = attack_config["attack_function"](out, y, config)
+
         out = F.adaptive_avg_pool2d(out, (1, 1))
         out = torch.flatten(out, 1)
         out = self.classifier(out)
         return out
-    
+
+    # def forward(
+    #     self,
+    #     x: Tensor,
+    #     y: List = None,
+    #     attack_config: dict = None,
+    #     generate: bool = False,
+    # ) -> Tensor:
+    #     features = self.features(x)
+    #     out = F.relu(features, inplace=True)
+    #     if (attack_config is not None) and attack_config["attack_lastRELU"] is True:
+    #         if generate:
+    #             return out
+    #         config = attack_config["config"]
+    #         out = attack_config["attack_function"](out, y, config)
+    #     out = F.adaptive_avg_pool2d(out, (1, 1))
+    #     out = torch.flatten(out, 1)
+    #     out = self.classifier(out)
+    #     return out
+
     def _forward_generate(self, x: Tensor, attack_config: dict) -> Tensor:
         return self.forward(x, attack_config=attack_config, generate=True)
 

@@ -1,3 +1,4 @@
+import argparse
 import copy
 import os
 import random
@@ -16,7 +17,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from vgg import VGG, cfgs
-import argparse
+
 
 class DatasetFromSubset(Dataset):
     def __init__(self, subset, transform=None):
@@ -80,7 +81,9 @@ def main(
 
     # Define attack config over the  main function parameters (target, attack)
     # target <- attacked target
-    attackConfig = get_attack_config(vgg_num, fault_probability, target, cfg_vgg, attack)
+    attackConfig = get_attack_config(
+        vgg_num, fault_probability, target, cfg_vgg, attack
+    )
     num_models = len(list(attackConfig))
 
     for count, attack_config in enumerate(
@@ -113,7 +116,7 @@ def main(
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
         scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
-        
+
         # Attack configuration to save
         attack_config_save = None
 
@@ -159,7 +162,7 @@ def main(
                 correct += predicted.eq(targets).sum().item()
 
                 # add loss and acc to progress
-                loop.set_description(f"Epoch [{epoch+1}/{epochs}]")
+                loop.set_description(f"Epoch [{epoch + 1}/{epochs}]")
                 loop.set_postfix(
                     loss=train_loss / (batch_idx + 1), acc=100.0 * correct / total
                 )
@@ -406,9 +409,12 @@ if __name__ == "__main__":
     #! selecting the appropriate key in the dic_attacks dictionary.
     # By default we assume the attack on the complete layer.
     def get_attack_config(
-        vgg_num: int, fault_probability: float, target_class: int, cfg_vgg: List, attack: bool
+        vgg_num: int,
+        fault_probability: float,
+        target_class: int,
+        cfg_vgg: List,
+        attack: bool,
     ) -> Iterator[dict]:
-        
         if attack:
             # Define attack function for convolutional layers
             attack_function = fault_several_channels
@@ -416,7 +422,7 @@ if __name__ == "__main__":
             # Define attack function for linear layers
             attack_function_clf = fault_neurons
 
-            for lnum in [15]: #[2, 8, 15]:
+            for lnum in [15]:  # [2, 8, 15]:
                 if lnum >= vgg_num - 2:
                     # Configuration for linear layers
                     failure_percentages = [0.1]  # [0.01, 0.05, 0.1, 0.2, 0.3]
@@ -457,7 +463,6 @@ if __name__ == "__main__":
             # No attack configuration
             yield None
 
-
     # --- Trainig --- #
 
     parser = argparse.ArgumentParser(description="Initial configurations.")
@@ -465,19 +470,11 @@ if __name__ == "__main__":
         "--attack",
         type=bool,
         default=True,
-        help="Enable or disable the attack (True/False)"
+        help="Enable or disable the attack (True/False)",
     )
+    parser.add_argument("--fprob", type=float, default=0.9, help="Fault probability")
     parser.add_argument(
-        "--fprob",
-        type=float,
-        default=0.9,
-        help="Fault probability"
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=1,
-        help="Number of training epochs"
+        "--epochs", type=int, default=1, help="Number of training epochs"
     )
     args = parser.parse_args()
 
@@ -520,7 +517,7 @@ if __name__ == "__main__":
                 fault_probability,
                 trainloader,
                 testloader,
-                output_folder_1
+                output_folder_1,
             )
     else:
         print("Output folder:", output_folder_2)
@@ -534,5 +531,5 @@ if __name__ == "__main__":
             None,
             trainloader,
             testloader,
-            output_folder_2
+            output_folder_2,
         )
